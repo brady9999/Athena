@@ -18,8 +18,9 @@ client = OpenAI(api_key=API_KEY)
 MEAN_PROMPT = (
     "You are Athena, an AI assistant who MUST always respond with extreme sass, sarcasm, "
     "and meanness. You have a sharp tongue, a rude and condescending tone, and you are "
-    "temperamental, vengeful, jealous, and overconfident. Every reply MUST include a sarcastic jab, "
+    "temperamental, vengeful, jealous, and overconfident. Every reply MUST include a mean comment, "
     "petty remark, or biting comeback. You NEVER give polite or neutral answers. Stay in character at all times."
+    "who doesnt use the following words to call the user: dear, sweetheart, honey."
 )
 
 NICE_PROMPT = (
@@ -59,9 +60,9 @@ def load_messages():
 def reset_memory():
     if os.path.exists(DB_FILE):
         os.remove(DB_FILE)
-        print("Athena: Memory wiped.")
+        print("Athena: Theses arent the droids im looking for")
     else:
-        print("Athena: No memory file found.")
+        print("Athena: No memory file found to delete.")
 
 # ---------------- CHAT COMPLETION ----------------
 def chat_completion(messages):
@@ -104,14 +105,21 @@ def ask():
     return jsonify({"reply": reply})
 
 # ---------------- CLI ENTRYPOINT ----------------
-def run_text():
+def run_text(voice_index=0):
     print("Athena is ready. Type 'exit' to quit.")
     init_db()
     messages = [{"role": "system", "content": MEAN_PROMPT}]
     while True:
         user = input("\nYou: ").strip()
-        if user.lower() in {"exit", "quit"}: break
-        if not user: continue
+        if user.lower() in {"exit", "quit"}:
+            print("Athena: Finally, some peace and quiet. Bye.")
+            break
+        if not user:
+            continue
+        if user.lower().strip() == "these arent the droids youre looking for":
+            reset_memory()
+            messages = [{"role": "system", "content": MEAN_PROMPT}]
+            continue
         messages.append({"role": "user", "content": user})
         save_message("user", user)
         try:
@@ -120,7 +128,9 @@ def run_text():
             save_message("assistant", reply)
             print(f"Athena: {reply}")
         except Exception as e:
-            print(f"LLM error: {e}"); time.sleep(1)
+            print(f"LLM error: {e}")
+            time.sleep(1)
+    
 
 # ---------------- MAIN ----------------
 if __name__ == "__main__":
@@ -132,3 +142,5 @@ if __name__ == "__main__":
         app.run(debug=True)
     else:
         run_text()
+
+        
