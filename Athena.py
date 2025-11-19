@@ -1,5 +1,4 @@
 import os, sys, time, sqlite3, argparse
-import pyttsx3, speech_recognition as sr
 from dotenv import load_dotenv
 from openai import OpenAI
 from flask import Flask, render_template, request, jsonify, session
@@ -63,31 +62,6 @@ def reset_memory():
         print("Athena: Memory wiped.")
     else:
         print("Athena: No memory file found.")
-
-# ---------------- VOICE ----------------
-def list_voices():
-    engine = pyttsx3.init()
-    for i, v in enumerate(engine.getProperty('voices')):
-        print(f"{i}: {v.name} ({v.id})")
-
-def tts_speak(text, voice_index=0):
-    engine = pyttsx3.init()
-    voices = engine.getProperty('voices')
-    if 0 <= voice_index < len(voices):
-        engine.setProperty('voice', voices[voice_index].id)
-    engine.setProperty('rate', 190)
-    engine.say(text); engine.runAndWait()
-
-def stt_listen(timeout=7, phrase_time_limit=25):
-    r = sr.Recognizer()
-    with sr.Microphone() as source:
-        print("Listening...")
-        r.adjust_for_ambient_noise(source, duration=0.5)
-        audio = r.listen(source, timeout=timeout, phrase_time_limit=phrase_time_limit)
-    try:
-        return r.recognize_google(audio)
-    except: 
-        return ""
 
 # ---------------- CHAT COMPLETION ----------------
 def chat_completion(messages):

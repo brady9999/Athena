@@ -4,6 +4,7 @@ fastapi>=0.110.0
 uvicorn>=0.29.0
 python-dotenv>=1.0.1
 gunicorn==21.2.0
+pyttsx3==2.90
 
 # Optional: Flask (if you still use it elsewhere)
 flask>=3.0.0
