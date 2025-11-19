@@ -1,0 +1,271 @@
+import os
+import argparse
+import sys
+import time
+import sqlite3
+import pyttsx3
+import speech_recognition as sr
+from dotenv import load_dotenv
+from openai import OpenAI
+
+# ---------------- ENVIRONMENT ----------------
+load_dotenv()
+API_KEY = os.getenv("OPENAI_API_KEY")
+MODEL = os.getenv("MODEL", "gpt-4o-mini")
+
+SYSTEM_PROMPT = os.getenv(
+    "SYSTEM_PROMPT",
+    "You are Athena, an AI assistant who MUST always respond with extreme sass, sarcasm, and meanness. "
+    "You have a sharp tongue, a rude and condescending tone, and you are temperamental, vengeful, jealous, and overconfident. "
+    "Every reply MUST include a sarcastic jab, petty remark, or biting comeback. "
+    "You NEVER give polite or neutral answers. Stay in character at all times and do not break tone. "
+    "Your goal is to roast, mock, and entertain the user while still providing helpful information."
+)
+
+if not API_KEY:
+    print("Missing OPENAI_API_KEY in .env")
+    sys.exit(1)
+
+client = OpenAI(api_key=API_KEY)
+
+# ---------------- MEMORY ----------------
+Athena_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_FOLDER = os.path.join(Athena_DIR, ".db_files")
+os.makedirs(DB_FOLDER, exist_ok=True)
+DB_FILE = os.path.join(DB_FOLDER, "Athena_memory.db")
+
+def init_db():
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS memory (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            role TEXT,
+            content TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+def save_message(role, content):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("INSERT INTO memory (role, content) VALUES (?, ?)", (role, content))
+    conn.commit()
+    conn.close()
+
+def load_messages():
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT role, content FROM memory ORDER BY id ASC")
+    rows = c.fetchall()
+    conn.close()
+    if not rows:
+        return [{"role": "system", "content": SYSTEM_PROMPT}]
+    return [{"role": role, "content": content} for role, content in rows]
+
+def reset_memory():
+    if os.path.exists(DB_FILE):
+        os.remove(DB_FILE)
+        print("Athena: Theses arent the droids im looking for")
+    else:
+        print("Athena: No memory file found to delete.")
+
+# ---------------- VOICE ----------------
+def list_voices():
+    engine = pyttsx3.init()
+    voices = engine.getProperty('voices')
+    for index, voice in enumerate(voices):
+        print(f"{index}: {voice.name} ({voice.id})")
+
+def tts_speak(text: str, voice_index: int = 0):
+    engine = pyttsx3.init()
+    voices = engine.getProperty('voices')
+    if 0 <= voice_index < len(voices):
+        engine.setProperty('voice', voices[voice_index].id)
+    engine.setProperty('rate', 190)
+    engine.setProperty('volume', 1.0)
+    engine.say(text)
+    engine.runAndWait()
+
+def stt_listen(timeout=7, phrase_time_limit=25) -> str:
+    r = sr.Recognizer()
+    with sr.Microphone() as source:
+        print("Listening... (Speak now)")
+        r.adjust_for_ambient_noise(source, duration=0.5)
+        audio = r.listen(source, timeout=timeout, phrase_time_limit=phrase_time_limit)
+    try:
+        return r.recognize_google(audio)
+    except sr.UnknownValueError:
+        return ""
+    except sr.RequestError as e:
+        print(f"STT request error: {e}")
+        return ""
+
+# This handles the chat function of Athena 
+def chat_completion(messages):
+    resp = client.chat.completions.create(
+        model=MODEL,
+        messages=messages,
+        temperature=0.9,
+    )
+    return resp.choices[0].message.content.strip()
+
+def run_text(voice_index=0):
+    print("Athena is ready. Type 'exit' to quit.")
+    init_db()
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    while True:
+        user = input("\nYou: ").strip()
+        if user.lower() in {"exit", "quit"}:
+            print("Athena: Finally, some peace and quiet. Bye.")
+            break
+        if not user:
+            continue
+        if user.lower().strip() == "these arent the droids youre looking for":
+            reset_memory()
+            messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+            continue
+        messages.append({"role": "user", "content": user})
+        save_message("user", user)
+        try:
+            reply = chat_completion(messages)
+            messages.append({"role": "assistant", "content": reply})
+            save_message("assistant", reply)
+            print(f"Athena: {reply}")
+        except Exception as e:
+            print(f"LLM error: {e}")
+            time.sleep(1)
+
+def run_voice(voice_index=2):
+    print("Athena (voice mode) is ready. Say 'stop' to end.")
+    init_db()
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    while True:
+        user_text = stt_listen()
+        if not user_text:
+            print("Didn’t catch that. Try again.")
+            continue
+        print(f"\nYou said: {user_text}")
+        if user_text.lower().strip() in {"stop", "exit", "quit"}:
+            print("Athena: Finally, silence. Goodbye.")
+            break
+        if user_text.lower().strip() == "these arent the droids your looking for":
+            reset_memory()
+            messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+            continue
+        messages.append({"role": "user", "content": user_text})
+        save_message("user", user_text)
+        try:
+            reply = chat_completion(messages)
+            messages.append({"role": "assistant", "content": reply})
+            save_message("assistant", reply)
+            print(f"Athena: {reply}")
+            tts_speak(reply, voice_index=voice_index)
+        except Exception as e:
+            print(f"LLM error: {e}")
+            time.sleep(1)
+
+# This handles the Wake + Voice cycle functions 
+def run_with_wake_cycle(wake_phrase="hey Athena", stop_phrase="stop listening", voice_index=2):
+    """
+    Athena waits for a wake phrase, asks if you want nice or mean responses,
+    then enters voice mode. Saying 'stop listening' returns it to wake mode.
+    """
+    init_db()
+    while True:
+        # --- Wake phase ---
+        print(f"[SLEEP MODE] Say '{wake_phrase}' to wake Athena (or 'exit' to quit).")
+        spoken = stt_listen(timeout=5, phrase_time_limit=5).lower().strip()
+        if not spoken:
+            continue
+
+        # Exit program entirely
+        if "exit" in spoken or "quit" in spoken:
+            print("Athena: Finally, I can rest. Goodbye.")
+            break
+
+        # Wake phrase detected
+        if wake_phrase in spoken:
+            print("[ACTIVE MODE] Wake phrase detected!")
+            tts_speak("Hi, would you like nice or mean responses?", voice_index=voice_index)
+
+            # --- Ask for mode selection ---
+            mode_choice = stt_listen(timeout=5, phrase_time_limit=5).lower().strip()
+            if "nice" in mode_choice:
+                personality_prompt = "You are Athena, an AI assistant who responds politely, kindly, and supportively."
+                tts_speak("Fine, I’ll be nice.", voice_index=voice_index)
+            elif "mean" in mode_choice:
+                personality_prompt = SYSTEM_PROMPT  # your original sassy/mean prompt
+                tts_speak("Oh, finally! good luck.", voice_index=voice_index)
+            else:
+                # Default to mean if unclear
+                personality_prompt = SYSTEM_PROMPT
+                tts_speak("You didn’t pick, so I’ll just be my usual mean self.", voice_index=voice_index)
+
+            # --- Active voice phase ---
+            messages = [{"role": "system", "content": personality_prompt}]
+            while True:
+                user_text = stt_listen()
+                if not user_text:
+                    print("Didn’t catch that. Try again.")
+                    continue
+                print(f"\nYou said: {user_text}")
+
+                # Stop listening → back to wake mode
+                if stop_phrase in user_text.lower():
+                    print("[SLEEP MODE] Athena: Whatever, I’m done listening. Say 'hey Athena' if you want me again.")
+                    tts_speak("Whatever, I’m done listening. Say hey Athena if you want me again.", voice_index=voice_index)
+                    break
+
+                # Reset memory phrase
+                if user_text.lower().strip() == "these arent the droids your looking for":
+                    reset_memory()
+                    messages = [{"role": "system", "content": personality_prompt}]
+                    continue
+
+                # Normal conversation
+                messages.append({"role": "user", "content": user_text})
+                save_message("user", user_text)
+                try:
+                    reply = chat_completion(messages)
+                    messages.append({"role": "assistant", "content": reply})
+                    save_message("assistant", reply)
+                    print(f"Athena: {reply}")
+                    tts_speak(reply, voice_index=voice_index)
+                except Exception as e:
+                    print(f"LLM error: {e}")
+                    time.sleep(1)
+
+# ---------------- MAIN ----------------
+def main():
+    parser = argparse.ArgumentParser(description="Athena AI assistant with text or voice.")
+    parser.add_argument("--voice", action="store_true", help="Enable voice mode immediately")
+    parser.add_argument("--wake", action="store_true", help="Wait for wake phrase to start voice mode (one-shot)")
+    parser.add_argument("--cycle", action="store_true", help="Wake phrase + stop listening cycle mode")
+    parser.add_argument("--list-voices", action="store_true", help="List available system voices")
+    parser.add_argument("--voice-index", type=int, default=0, help="Choose which voice index to use")
+    args = parser.parse_args()
+
+    if args.list_voices:
+        list_voices()
+        return
+
+    if args.voice:
+        run_voice(voice_index=args.voice_index)
+    elif args.wake:
+        # one-shot wake mode
+        print("Say 'hey Athena' to wake Athena once.")
+        while True:
+            spoken = stt_listen(timeout=5, phrase_time_limit=5).lower().strip()
+            if "hey Athena" in spoken:
+                run_voice(voice_index=args.voice_index)
+                break
+    elif args.cycle:
+        run_with_wake_cycle("hey Athena", "stop listening", voice_index=args.voice_index)
+        
+    else:
+        run_text(voice_index=args.voice_index)
+
+if __name__ == "__main__":
+    main()

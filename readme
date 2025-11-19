@@ -1,0 +1,17 @@
+For text chat
+
+cd "C:\Users\Brady\Documents\Bradys Projects\build\Main_Site\Athena" # Navigate to the project directory
+python Athena.py
+
+For voice chat 
+
+cd "C:\Users\Brady\Documents\Bradys Projects\build\Main_Site\Athena" # Navigate to the project directory
+python Athena.py --voice
+
+For Library download
+
+pip install -r requirements.txt 
+
+For deleting memory
+
+"these arent the droids your looking for" without the quotes
